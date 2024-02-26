@@ -1,0 +1,29 @@
+galaxy_info:
+  role_name: laravel
+  author: pniaps
+  description: Role to install a laravel project on a new server
+  license: MIT
+  min_ansible_version: 2.1
+  platforms:
+    - name: Debian
+      versions:
+        - all
+    - name: Ubuntu
+      versions:
+        - all
+
+  galaxy_tags:
+    - development
+    - web
+    - php
+    - laravel
+#dependencies:
+#  - role: geerlingguy.nginx
+#  - role: geerlingguy.php-versions
+#  - role: geerlingguy.php
+#  - role: geerlingguy.mysql
+#  - role: geerlingguy.php-mysql
+#  - role: geerlingguy.git
+#  - role: geerlingguy.composer
+  # List your role dependencies here, one per line. Be sure to remove the '[]' above,
+  # if you add dependencies to this list.

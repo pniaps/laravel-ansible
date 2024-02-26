@@ -1,0 +1,215 @@
+---
+
+- name: Install acl to act as non root user
+  apt:
+    name:
+      - acl
+  when: ansible_user is not defined or ansible_user != 'root'
+
+- name: Create group '{{ laravel_group }}'
+  ansible.builtin.group:
+    name: "{{ laravel_group }}"
+    state: present
+
+- name: Create user '{{ laravel_user }}' with group '{{ laravel_group }}'
+  ansible.builtin.user:
+    name: "{{ laravel_user }}"
+    group: "{{ laravel_group }}"
+    shell: /bin/bash
+
+- name: "create project folder '{{ laravel_path }}'"
+  file:
+    path: "{{ laravel_path }}"
+    state: directory
+    owner: "{{ laravel_user }}"
+    group: "{{ laravel_group }}"
+    mode: 0770
+
+- import_role:
+    name: geerlingguy.nginx
+  vars:
+    nginx_client_max_body_size: 256m
+    nginx_remove_default_vhost: true
+    nginx_vhosts:
+      - listen: "80"
+        server_name: "{{ laravel_domain }}"
+        root: "{{ laravel_path }}/public"
+        index: "index.php"
+        state: present
+        extra_parameters: |
+          charset utf-8;
+          add_header X-Frame-Options "SAMEORIGIN";
+          add_header X-Content-Type-Options "nosniff";
+          location / {
+            try_files $uri $uri/ /index.php?$query_string;
+          }
+          location = /favicon.ico { access_log off; log_not_found off; }
+          location = /robots.txt  { access_log off; log_not_found off; }
+          location ~ \.php$ {
+            fastcgi_pass unix:/run/php/php{{ laravel_php_version }}-fpm-{{ laravel_domain }}.sock;
+            fastcgi_param SCRIPT_FILENAME $realpath_root$fastcgi_script_name;
+            include fastcgi_params;
+          }
+          location ~ /\.(?!well-known).* {
+            deny all;
+          }
+
+- import_role:
+    name: geerlingguy.mysql
+  vars:
+    mysql_bind_address: 127.0.0.1
+    mysql_databases:
+      - name: "{{ db_database }}"
+        encoding: utf8mb4
+        collation: utf8mb4_unicode_ci
+    mysql_users:
+      - name: "{{ db_user }}"
+        password: "{{ db_pass }}"
+        priv: "{{ db_database }}.*:ALL"
+  when: db_host == 'localhost'
+
+- name: Define php_version
+  set_fact:
+    php_version: "{{ laravel_php_version }}"
+
+- name: Define PHP variables.
+  set_fact:
+    php_webserver_daemon: "nginx"
+    php_enable_php_fpm: true
+    php_memory_limit: "512M"
+    php_max_execution_time: "30"
+    php_upload_max_filesize: "256M"
+    php_packages:
+      - php{{ php_version }}
+      - php{{ php_version }}-apcu
+      - php{{ php_version }}-cli
+      - php{{ php_version }}-common
+      - php{{ php_version }}-curl
+      - php{{ php_version }}-fpm
+      - php{{ php_version }}-gd
+      - php{{ php_version }}-mbstring
+      - php{{ php_version }}-opcache
+      - php{{ php_version }}-pdo
+      - php{{ php_version }}-xml
+      - php{{ php_version }}-zip
+      - unzip
+    php_packages_state: latest
+    php_date_timezone: "Europe/Madrid"
+    php_conf_paths:
+      - /etc/php/{{ php_version }}/fpm
+      - /etc/php/{{ php_version }}/cli
+    php_extension_conf_paths:
+      - /etc/php/{{ php_version }}/fpm/conf.d
+      - /etc/php/{{ php_version }}/cli/conf.d
+    php_fpm_state: started
+    php_fpm_enabled_on_boot: true
+    php_fpm_handler_state: restarted
+    php_fpm_pools:
+      - pool_name: "{{ laravel_domain }}"
+        pool_template: php-pool.j2
+
+
+- import_role:
+    name: geerlingguy.php-versions
+
+- import_role:
+    name: geerlingguy.php-mysql
+
+- name: "Delete default php pool '{{ php_fpm_pool_conf_path }}'."
+  file:
+    path: "{{ php_fpm_pool_conf_path }}"
+    state: absent
+
+- import_role:
+    name: geerlingguy.git
+
+- import_role:
+    name: geerlingguy.composer
+
+- import_role:
+    name: geerlingguy.pip # needed for supervisor
+
+- name: "Update repository"
+  ansible.builtin.git:
+    repo: "{{ laravel_repo }}"
+    dest: "{{ laravel_path }}"
+    force: yes
+  become: true
+  become_user: "{{ laravel_user }}"
+  register: git_result
+  changed_when: "git_result.after != git_result.before"
+
+- name: "Set up .env file"
+  template:
+    src: laravel-env.j2
+    dest: "{{ laravel_path }}/.env"
+    owner: "{{ laravel_user }}"
+    group: "{{ laravel_group }}"
+  register: env_result
+
+- name: "Composer install"
+  composer:
+    command: install
+    working_dir: "{{ laravel_path }}"
+  become: true
+  become_user: "{{ laravel_user }}"
+  when: git_result.changed # Only run if we pulled changes
+
+- name: "Generate app key"
+  command: "/usr/bin/php {{ laravel_path }}/artisan key:generate --force"
+
+- name: "Set up app storage link"
+  command: "/usr/bin/php {{ laravel_path }}/artisan storage:link"
+
+- name: "Configuration cache"
+  command: "/usr/bin/php {{ laravel_path }}/artisan config:cache"
+  when: git_result.changed or env_result.changed
+
+- name: "Route cache"
+  command: "/usr/bin/php {{ laravel_path }}/artisan route:cache"
+  when: git_result.changed or env_result.changed
+
+- name: "Clear the view cache"
+  command: "/usr/bin/php {{ laravel_path }}/artisan view:clear"
+  when: git_result.changed or env_result.changed
+
+- name: "Run migrations"
+  command: "/usr/bin/php {{ laravel_path }}/artisan migrate --force"
+  when: git_result.changed or env_result.changed
+
+- name: "Cron Laravel scheduler"
+  cron:
+    name: "Laravel scheduler"
+    job: "cd {{ laravel_path }} && /usr/bin/php artisan schedule:run >> /dev/null 2>&1"
+    user: "{{ laravel_user }}"
+
+- name: "Add '{{ nginx_user }}' to group '{{ laravel_group }}'"
+  user:
+    name: '{{ nginx_user }}'
+    groups: '{{ laravel_group }}'
+    append: yes
+  notify: restart webserver
+
+- name: "Configure laravel Queues"
+  import_role:
+    name: geerlingguy.supervisor
+  vars:
+    supervisor_programs:
+      - name: "{{ laravel_domain }}-worker"
+        command: /usr/bin/php {{ laravel_path }}/artisan queue:work --queue=default --tries=3 --timeout=120
+        state: present
+        configuration: |
+          process_name=%(program_name)s_%(process_num)02d
+          autostart=true
+          autorestart=true
+          stopasgroup=true
+          killasgroup=true
+          numprocs=4
+          startretries=1
+          startsecs=1
+          redirect_stderr=true
+          stdout_logfile={{ laravel_path }}/storage/logs/worker.log
+          stdout_logfile_maxbytes=100MB
+          stdout_logfile_backups=10
+          user={{ laravel_user }}
+          directory={{ laravel_path }}

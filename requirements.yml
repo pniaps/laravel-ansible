@@ -1,0 +1,9 @@
+#https://docs.ansible.com/ansible/latest/galaxy/user_guide.html#installing-roles
+
+- name: geerlingguy.nginx
+- name: geerlingguy.php-versions
+- name: geerlingguy.php
+- name: geerlingguy.mysql
+- name: geerlingguy.php-mysql
+- name: geerlingguy.git
+- name: geerlingguy.composer

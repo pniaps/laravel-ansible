@@ -1,0 +1,15 @@
+[{{ laravel_domain }}]
+user = {{ laravel_user }}
+group = {{ laravel_group }}
+listen = /run/php/php{{ laravel_php_version }}-fpm-{{ laravel_domain }}.sock
+listen.owner = www-data
+listen.group = www-data
+php_admin_value[disable_functions] = exec,passthru,shell_exec,system
+php_admin_flag[allow_url_fopen] = off
+pm = {{ item.pool_pm | default('dynamic', true) }}
+pm.max_children = {{ item.pool_pm_max_children | default(50, true) }}
+pm.start_servers = {{ item.pool_pm_start_servers | default(5, true) }}
+pm.min_spare_servers = {{ item.pool_pm_min_spare_servers | default(5, true) }}
+pm.max_spare_servers = {{ item.pool_pm_max_spare_servers | default(5, true) }}
+pm.max_requests = {{ item.pool_pm_max_requests | default(500, true) }}
+chdir = {{ laravel_path }}

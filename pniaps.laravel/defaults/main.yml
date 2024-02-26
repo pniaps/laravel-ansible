@@ -1,0 +1,16 @@
+---
+laravel_php_version: "8.3"
+laravel_domain: laravel.local
+laravel_path: /var/www/{{ laravel_domain }}
+laravel_user: "laravel"
+laravel_group: "laravel"
+laravel_repo: https://github.com/laravel/laravel.git
+
+app_name: "Laravel App"
+app_env: "production"
+app_url: "http://{{ laravel_domain }}"
+db_host: localhost
+db_port: 3306
+db_database: laravel
+db_user: larauser
+db_pass: larapass
